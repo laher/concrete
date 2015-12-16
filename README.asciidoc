@@ -1,0 +1,11 @@
+= concrete
+
+concrete: a tool to generate interface implementations for Go
+
+== Usage
+
+	concrete -interface <InterfaceName> -in-file <existing-file.go> -impl-package <package> [options]
+
+== Example
+
+	go run concrete.go -interface DoesTheThings -in-file fixtures/interface1.go -impl-package dummy
