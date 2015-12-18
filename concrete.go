@@ -18,7 +18,7 @@ import (
 var (
 	interfaceName   = flag.String("interface", "", "The name of the interface to be implemented")
 	inPackage       = flag.String("in-package", ".", "package where interface is defined")
-	implPackage     = flag.String("impl-package", "", "package where implementation should be created")
+	implPackage     = flag.String("impl-package", ".", "package where implementation should be created")
 	concreteTypeTpl = flag.String("implementation", "{{.Interface}}Impl", "The name of the concrete implementation")
 	helpFlag        = flag.Bool("help", false, "show detailed help message")
 	writeFlag       = flag.Bool("w", false, "rewrite input files in place (by default, the results are printed to standard output)")
@@ -29,7 +29,7 @@ const usage = `concrete: a tool to implement interfaces
 
 Usage: concrete -interface <InterfaceName> -in-file <existing-file.go> -impl-package <package> [options]
 
--in-file         existing file which contains the interface
+-in-package      existing package which contains the interface
 -interface       name of interface
 -impl-package    package name of existing interface
 -concrete        The name of the implementation. Uses templates. default '{{.Interface}}Impl'
@@ -67,27 +67,48 @@ func doMain() error {
 		fmt.Printf("Error processing template")
 		return err
 	}
-	return parseAndPrintFiles(*inPackage, *interfaceName, out.String(), *implPackage)
+	return parseAndPrintFiles(*inPackage, *interfaceName, *implPackage, out.String())
 }
 
-func parseAndPrintFiles(interfacePackage, interfaceName, concreteType, pkg string) error {
-	if !strings.HasPrefix(interfacePackage, ".") {
-		return fmt.Errorf("Only relative paths (beginning with a . ) supported for now")
+func pkgToFiles(pkg string) (*token.FileSet, []*ast.File, error) {
+	if !strings.HasPrefix(pkg, ".") {
+		return nil, nil, fmt.Errorf("Only relative paths (beginning with a . ) supported for now")
 	}
 	fset := token.NewFileSet()
-	matches, err := filepath.Glob(interfacePackage + "/*.go")
+	matches, err := filepath.Glob(filepath.Join(pkg, "*.go"))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	files := []*ast.File{}
 	for _, match := range matches {
 		f, err := parser.ParseFile(fset, match, nil, 0)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		files = append(files, f)
 	}
-	err = mix(fset, files, interfaceName, concreteType, pkg)
+	return fset, files, nil
+}
+
+func parseAndPrintFiles(interfacePackage, interfaceName, concretePkg, concreteType string) error {
+	fset, files, err := pkgToFiles(interfacePackage)
+	if err != nil {
+		return err
+	}
+	conf := types.Config{Importer: importer.Default()}
+	inPkg, err := conf.Check(interfacePackage, fset, files, nil)
+	if err != nil {
+		return err
+	}
+	if concretePkg == "" {
+		concretePkg = interfacePackage
+	}
+	concPkg := inPkg
+	if concretePkg != interfacePackage {
+		//only same-package for now, due to import path complexity
+		return fmt.Errorf("Only same-package supported")
+	}
+	err = mix(inPkg, concPkg, interfaceName, concreteType)
 	return err
 }
 
@@ -98,26 +119,29 @@ func parseAndPrint(input string, interfaceName, concreteType, pkg string) error 
 		return err
 	}
 	fs := []*ast.File{f}
-	return mix(fset, fs, interfaceName, concreteType, pkg)
-}
-
-func mix(fset *token.FileSet, f []*ast.File, interfaceName string, concreteType string, pkgName string) error {
-	// Type-check a package consisting of this file.
-	// Type information for the imported packages
-	// comes from $GOROOT/pkg/$GOOS_$GOOARCH/fmt.a.
 	conf := types.Config{Importer: importer.Default()}
-	pkg, err := conf.Check(pkgName, fset, f, nil)
+	inPkg, err := conf.Check(pkg, fset, fs, nil)
 	if err != nil {
 		return err
 	}
-	if pkgName == "" {
-		pkgName = pkg.Name()
-	}
+	return mix(inPkg, inPkg, interfaceName, concreteType)
+}
+
+func mix(inPkg, concPkg *types.Package, interfaceName string, concreteType string) error {
+	// Type-check a package consisting of this file.
+	// Type information for the imported packages
+	// comes from $GOROOT/pkg/$GOOS_$GOOARCH/fmt.a.
+
 	// Print the method sets of Celsius and *Celsius.
-	lu := pkg.Scope().Lookup(interfaceName)
+	lu := inPkg.Scope().Lookup(interfaceName)
 	if lu == nil {
 		return fmt.Errorf("Could not find interface '%s'", interfaceName)
 	}
+	lookupConcType := concPkg.Scope().Lookup(concreteType)
+	if lookupConcType != nil {
+		return fmt.Errorf("Implementation '%s' already exists", concreteType)
+	}
+
 	t := lu.Type()
 	//fmt.Printf("Method set of %s (type %T):\n", t, t)
 	mset := types.NewMethodSet(t)
@@ -132,7 +156,11 @@ func mix(fset *token.FileSet, f []*ast.File, interfaceName string, concreteType 
 	k, ok := nu.(*types.Interface)
 	if ok {
 		//fmt.Println("It's an interface")
-		fmt.Printf("package %s\n\n", pkgName)
+		fmt.Printf("package %s\n\n", concPkg.Name())
+		for _, pkg := range inPkg.Imports() {
+			fmt.Printf("import \"%s\"\n", pkg.Path())
+		}
+		fmt.Printf("\n")
 		fmt.Printf("type %s struct {\n\n}\n\n", concreteType)
 		for i := 0; i < k.NumMethods(); i++ {
 			//	fmt.Printf("%#v\n", k.Method(i))
@@ -166,6 +194,9 @@ func mix(fset *token.FileSet, f []*ast.File, interfaceName string, concreteType 
 					}
 				}
 				fmt.Printf(") {\n")
+				if r.Len() == 1 {
+					fmt.Printf("\treturn nil\n")
+				}
 			} else {
 				fmt.Printf("func (%s %s) %s(", typeIdentifier, concreteType, f.Name()) //, s.String)
 				fmt.Printf("?) {\n")
