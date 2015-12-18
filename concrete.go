@@ -9,15 +9,16 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/template"
 )
 
 var (
 	interfaceName   = flag.String("interface", "", "The name of the interface to be implemented")
-	filename        = flag.String("in-file", "", "file where interface is defined")
-	implPackage     = flag.String("impl-package", "", "package")
+	inPackage       = flag.String("in-package", ".", "package where interface is defined")
+	implPackage     = flag.String("impl-package", "", "package where implementation should be created")
 	concreteTypeTpl = flag.String("implementation", "{{.Interface}}Impl", "The name of the concrete implementation")
 	helpFlag        = flag.Bool("help", false, "show detailed help message")
 	writeFlag       = flag.Bool("w", false, "rewrite input files in place (by default, the results are printed to standard output)")
@@ -37,7 +38,7 @@ Usage: concrete -interface <InterfaceName> -in-file <existing-file.go> -impl-pac
 
 func main() {
 	if err := doMain(); err != nil {
-		fmt.Fprintf(os.Stderr, "eg: %s\n", err)
+		fmt.Fprintf(os.Stderr, "concrete: %s\n", err)
 		os.Exit(1)
 	}
 }
@@ -45,7 +46,7 @@ func main() {
 func doMain() error {
 	flag.Parse()
 
-	if *helpFlag || *filename == "" {
+	if *helpFlag || *interfaceName == "" {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
@@ -66,39 +67,58 @@ func doMain() error {
 		fmt.Printf("Error processing template")
 		return err
 	}
-	parseAndPrintFile(*filename, *interfaceName, out.String(), *implPackage)
-	return nil
+	return parseAndPrintFiles(*inPackage, *interfaceName, out.String(), *implPackage)
 }
 
-func parseAndPrintFile(filename, interfaceName, concreteType, pkg string) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filename, nil, 0)
-	if err != nil {
-		log.Fatal(err)
+func parseAndPrintFiles(interfacePackage, interfaceName, concreteType, pkg string) error {
+	if !strings.HasPrefix(interfacePackage, ".") {
+		return fmt.Errorf("Only relative paths (beginning with a . ) supported for now")
 	}
-	mix(fset, f, interfaceName, concreteType, pkg)
+	fset := token.NewFileSet()
+	matches, err := filepath.Glob(interfacePackage + "/*.go")
+	if err != nil {
+		return err
+	}
+	files := []*ast.File{}
+	for _, match := range matches {
+		f, err := parser.ParseFile(fset, match, nil, 0)
+		if err != nil {
+			return err
+		}
+		files = append(files, f)
+	}
+	err = mix(fset, files, interfaceName, concreteType, pkg)
+	return err
 }
 
-func parseAndPrint(input string, interfaceName, concreteType, pkg string) {
+func parseAndPrint(input string, interfaceName, concreteType, pkg string) error {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "blah.go", input, 0)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	mix(fset, f, interfaceName, concreteType, pkg)
+	fs := []*ast.File{f}
+	return mix(fset, fs, interfaceName, concreteType, pkg)
 }
 
-func mix(fset *token.FileSet, f *ast.File, interfaceName string, concreteType string, pkgName string) {
+func mix(fset *token.FileSet, f []*ast.File, interfaceName string, concreteType string, pkgName string) error {
 	// Type-check a package consisting of this file.
 	// Type information for the imported packages
 	// comes from $GOROOT/pkg/$GOOS_$GOOARCH/fmt.a.
 	conf := types.Config{Importer: importer.Default()}
-	pkg, err := conf.Check(pkgName, fset, []*ast.File{f}, nil)
+	pkg, err := conf.Check(pkgName, fset, f, nil)
 	if err != nil {
-		log.Fatal(err)
+		return err
+	}
+	if pkgName == "" {
+		pkgName = pkg.Name()
 	}
 	// Print the method sets of Celsius and *Celsius.
-	t := pkg.Scope().Lookup(interfaceName).Type()
+	lu := pkg.Scope().Lookup(interfaceName)
+	if lu == nil {
+		return fmt.Errorf("Could not find interface '%s'", interfaceName)
+	}
+	t := lu.Type()
 	//fmt.Printf("Method set of %s (type %T):\n", t, t)
 	mset := types.NewMethodSet(t)
 	for i := 0; i < mset.Len(); i++ {
@@ -155,5 +175,5 @@ func mix(fset *token.FileSet, f *ast.File, interfaceName string, concreteType st
 		}
 	}
 	fmt.Println()
-
+	return nil
 }
