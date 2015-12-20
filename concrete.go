@@ -9,6 +9,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func main() {
 
 func doMain() error {
 	flag.Parse()
-
+	w := os.Stdout
 	if *listInterfaces {
 		inPkg, err := packageNameToPkg(*inPackage)
 		if err != nil {
@@ -54,7 +55,7 @@ func doMain() error {
 
 			_, ok := nu.(*types.Interface)
 			if ok {
-				fmt.Printf(" %s\n", lu.Name())
+				fmt.Fprintf(w, " %s\n", lu.Name())
 			}
 		}
 		return nil
@@ -67,7 +68,7 @@ func doMain() error {
 
 	tmpl, err := template.New("concreteTypeTemplate").Parse(*concreteTypeTpl)
 	if err != nil {
-		fmt.Printf("Error parsing template")
+		fmt.Fprintf(w, "Error parsing template")
 		return err
 	}
 	data := struct {
@@ -78,10 +79,17 @@ func doMain() error {
 	var out bytes.Buffer
 	err = tmpl.Execute(&out, data)
 	if err != nil {
-		fmt.Printf("Error processing template")
+		fmt.Fprintf(w, "Error processing template")
 		return err
 	}
-	return parseAndPrintFiles(*inPackage, *interfaceName, *implPackage, out.String())
+	concreteType := out.String()
+	if *writeFlag {
+		w, err = os.OpenFile(concreteType+".gox", os.O_CREATE|os.O_WRONLY, 0777)
+		if err != nil {
+			return err
+		}
+	}
+	return parseAndPrintFiles(w, *inPackage, *interfaceName, *implPackage, out.String())
 }
 
 func pkgToFiles(pkg string) (*token.FileSet, []*ast.File, error) {
@@ -117,7 +125,7 @@ func packageNameToPkg(interfacePackage string) (*types.Package, error) {
 	return inPkg, err
 }
 
-func parseAndPrintFiles(interfacePackage, interfaceName, concretePkg, concreteType string) error {
+func parseAndPrintFiles(w io.Writer, interfacePackage, interfaceName, concretePkg, concreteType string) error {
 	inPkg, err := packageNameToPkg(interfacePackage)
 	if err != nil {
 		return err
@@ -130,11 +138,11 @@ func parseAndPrintFiles(interfacePackage, interfaceName, concretePkg, concreteTy
 		//only same-package for now, due to import path complexity
 		return fmt.Errorf("Only same-package supported")
 	}
-	err = mix(inPkg, concPkg, interfaceName, concreteType)
+	err = mix(w, inPkg, concPkg, interfaceName, concreteType)
 	return err
 }
 
-func parseAndPrint(input string, interfaceName, concreteType, pkg string) error {
+func parseAndPrint(w io.Writer, input string, interfaceName, concreteType, pkg string) error {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "blah.go", input, 0)
 	if err != nil {
@@ -146,10 +154,10 @@ func parseAndPrint(input string, interfaceName, concreteType, pkg string) error 
 	if err != nil {
 		return err
 	}
-	return mix(inPkg, inPkg, interfaceName, concreteType)
+	return mix(w, inPkg, inPkg, interfaceName, concreteType)
 }
 
-func mix(inPkg, concPkg *types.Package, interfaceName string, concreteType string) error {
+func mix(w io.Writer, inPkg, concPkg *types.Package, interfaceName string, concreteType string) error {
 	// Type-check a package consisting of this file.
 	// Type information for the imported packages
 	// comes from $GOROOT/pkg/$GOOS_$GOOARCH/fmt.a.
@@ -165,33 +173,33 @@ func mix(inPkg, concPkg *types.Package, interfaceName string, concreteType strin
 	}
 
 	t := lu.Type()
-	//fmt.Printf("Method set of %s (type %T):\n", t, t)
+	//fmt.Fprintf(w,"Method set of %s (type %T):\n", t, t)
 	mset := types.NewMethodSet(t)
 	for i := 0; i < mset.Len(); i++ {
-		//fmt.Printf("%#v\n", mset.At(i))
+		//fmt.Fprintf(w,"%#v\n", mset.At(i))
 
 	}
 	nu := t.Underlying()
 
 	typeIdentifier := "t"
-	//fmt.Printf("Underlying type %T):\n", nu)
+	//fmt.Fprintf(w,"Underlying type %T):\n", nu)
 	k, ok := nu.(*types.Interface)
 	if ok {
 		//fmt.Println("It's an interface")
-		fmt.Printf("package %s\n\n", concPkg.Name())
+		fmt.Fprintf(w, "package %s\n\n", concPkg.Name())
 		for _, pkg := range inPkg.Imports() {
-			fmt.Printf("import \"%s\"\n", pkg.Path())
+			fmt.Fprintf(w, "import \"%s\"\n", pkg.Path())
 		}
-		fmt.Printf("\n")
-		fmt.Printf("type %s struct {\n\n}\n\n", concreteType)
+		fmt.Fprintf(w, "\n")
+		fmt.Fprintf(w, "type %s struct {\n\n}\n\n", concreteType)
 		for i := 0; i < k.NumMethods(); i++ {
-			//	fmt.Printf("%#v\n", k.Method(i))
+			//	fmt.Fprintf(w,"%#v\n", k.Method(i))
 			f := k.Method(i)
 			//29.24 vs 34.21 => 20y2m21d down from 26y2m
 			//116.23 vs 136.83 => 20y2m21d down from 26y2m
 			s, ok := f.Type().(*types.Signature)
 			if ok {
-				fmt.Printf("func (%s *%s) %s(", typeIdentifier, concreteType, f.Name()) //, s.String)
+				fmt.Fprintf(w, "func (%s *%s) %s(", typeIdentifier, concreteType, f.Name()) //, s.String)
 				p := s.Params()
 				for i := 0; i < p.Len(); i++ {
 					param := p.At(i)
@@ -201,30 +209,30 @@ func mix(inPkg, concPkg *types.Package, interfaceName string, concreteType strin
 					}
 					//paramPkg := param.Pkg().String()
 					typedef := param.Type().String()
-					fmt.Printf("%s %s", name, typedef)
+					fmt.Fprintf(w, "%s %s", name, typedef)
 					if i < p.Len()-1 {
-						fmt.Printf(", ")
+						fmt.Fprintf(w, ", ")
 					}
 				}
-				fmt.Printf(") (")
+				fmt.Fprintf(w, ") (")
 				r := s.Results()
 				for i := 0; i < r.Len(); i++ {
 					restype := r.At(i).Type()
-					fmt.Printf("%s", restype)
+					fmt.Fprintf(w, "%s", restype)
 					if i < r.Len()-1 {
-						fmt.Printf(", ")
+						fmt.Fprintf(w, ", ")
 					}
 				}
-				fmt.Printf(") {\n")
+				fmt.Fprintf(w, ") {\n")
 				if r.Len() == 1 {
-					fmt.Printf("\treturn nil\n")
+					fmt.Fprintf(w, "\treturn nil\n")
 				}
 			} else {
-				fmt.Printf("func (%s %s) %s(", typeIdentifier, concreteType, f.Name()) //, s.String)
-				fmt.Printf("?) {\n")
+				fmt.Fprintf(w, "func (%s %s) %s(", typeIdentifier, concreteType, f.Name()) //, s.String)
+				fmt.Fprintf(w, "?) {\n")
 			}
 			//return
-			fmt.Printf("}\n\n")
+			fmt.Fprintf(w, "}\n\n")
 		}
 	}
 	fmt.Println()

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestConcreteSimple(t *testing.T) {
 	const input = `
@@ -19,5 +22,5 @@ type Rdr interface {
 	interfaceName := "Rdr"
 	concreteType := "My" + interfaceName
 	pkgName := "temperature"
-	parseAndPrint(input, interfaceName, concreteType, pkgName)
+	parseAndPrint(os.Stdout, input, interfaceName, concreteType, pkgName)
 }
