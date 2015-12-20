@@ -23,17 +23,13 @@ var (
 	helpFlag        = flag.Bool("help", false, "show detailed help message")
 	writeFlag       = flag.Bool("w", false, "rewrite input files in place (by default, the results are printed to standard output)")
 	verboseFlag     = flag.Bool("v", false, "show verbose matcher diagnostics")
+	listInterfaces  = flag.Bool("l", false, "list interfaces")
 )
 
-const usage = `concrete: a tool to implement interfaces
+const usage = `concrete: a tool to implement Go interfaces
 
-Usage: concrete -interface <InterfaceName> -in-file <existing-file.go> -impl-package <package> [options]
+Usage: concrete -interface <InterfaceName> [options]
 
--in-package      existing package which contains the interface
--interface       name of interface
--impl-package    package name of existing interface
--concrete        The name of the implementation. Uses templates. default '{{.Interface}}Impl'
--help            show detailed help message
 `
 
 func main() {
@@ -46,8 +42,26 @@ func main() {
 func doMain() error {
 	flag.Parse()
 
+	if *listInterfaces {
+		inPkg, err := packageNameToPkg(*inPackage)
+		if err != nil {
+			return err
+		}
+		names := inPkg.Scope().Names()
+		for _, name := range names {
+			lu := inPkg.Scope().Lookup(name)
+			nu := lu.Type().Underlying()
+
+			_, ok := nu.(*types.Interface)
+			if ok {
+				fmt.Printf(" %s\n", lu.Name())
+			}
+		}
+		return nil
+	}
 	if *helpFlag || *interfaceName == "" {
 		fmt.Fprint(os.Stderr, usage)
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
 
@@ -90,13 +104,21 @@ func pkgToFiles(pkg string) (*token.FileSet, []*ast.File, error) {
 	return fset, files, nil
 }
 
-func parseAndPrintFiles(interfacePackage, interfaceName, concretePkg, concreteType string) error {
+func packageNameToPkg(interfacePackage string) (*types.Package, error) {
 	fset, files, err := pkgToFiles(interfacePackage)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	conf := types.Config{Importer: importer.Default()}
 	inPkg, err := conf.Check(interfacePackage, fset, files, nil)
+	if err != nil {
+		return nil, err
+	}
+	return inPkg, err
+}
+
+func parseAndPrintFiles(interfacePackage, interfaceName, concretePkg, concreteType string) error {
+	inPkg, err := packageNameToPkg(interfacePackage)
 	if err != nil {
 		return err
 	}
