@@ -34,7 +34,7 @@ Usage: concrete -interface <InterfaceName> [options]
 `
 
 func main() {
-	if err := doMain(); err != nil {
+	if err := doMain2(); err != nil {
 		fmt.Fprintf(os.Stderr, "concrete: %s\n", err)
 		os.Exit(1)
 	}
