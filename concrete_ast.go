@@ -12,42 +12,7 @@ import (
 	"text/template"
 )
 
-func doMain2() error {
-	implName := "MyImpl"
-	/*
-			f, err := cr(os.Stdout, implName, "mypkg")
-			if err != nil {
-				return err
-			}
-		f := &ast.File{
-			Name:    ast.NewIdent("mypkg"),
-			Decls:   []ast.Decl{},
-			Imports: []*ast.ImportSpec{},
-		}
-	*/
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "blah.go", minimal, 0)
-	if err != nil {
-		return err
-	}
-	i := &ast.ImportSpec{Path: &ast.BasicLit{Value: "\"flag\""}, Name: ast.NewIdent("_")}
-	i.Name.NamePos = token.Pos(2)
-	f.Imports = append(f.Imports, i)
-	//	fmt.Printf("File: %+v", f)
-	for _, i := range f.Imports {
-		fmt.Printf("import: %#v\n", i)
-		fmt.Printf("import: %s - %s\n", i.Name, i.Path.Value)
-		if i.Name != nil {
-			fmt.Printf("import Name: %#v \n", i.Name)
-		}
-	}
-	fmt.Printf("package: %#v\n", f.Package)
-	f.Name.Name = "m"
-	//	f.Package = "m"
-	for _, d := range f.Decls {
-		fmt.Printf("decl: %#v\n", d)
-		fmt.Printf("\n")
-	}
+func addImplementationStruct(f *ast.File, implName string) {
 	implFound := false
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch t := node.(type) {
@@ -75,6 +40,34 @@ func doMain2() error {
 	} else {
 		//already found. No generaty
 	}
+}
+
+func addImport(f *ast.File, path, name string) {
+	i := &ast.ImportSpec{Path: &ast.BasicLit{Value: "\"" + path + "\""}}
+	if name != "" {
+		i.Name = ast.NewIdent("_")
+	}
+	gdi := &ast.GenDecl{Specs: []ast.Spec{
+		i,
+	}, Tok: token.IMPORT}
+	f.Decls = append(f.Decls, gdi)
+	f.Imports = append(f.Imports, i)
+}
+
+func printTypeInfo(f *ast.File) {
+	for _, i := range f.Imports {
+		fmt.Printf("import: %#v\n", i)
+		fmt.Printf("import: %s - %s\n", i.Name, i.Path.Value)
+		if i.Name != nil {
+			fmt.Printf("import Name: %#v \n", i.Name)
+		}
+	}
+	fmt.Printf("package: %#v\n", f.Package)
+	//	f.Package = "m"
+	for _, d := range f.Decls {
+		fmt.Printf("decl: %#v\n", d)
+		fmt.Printf("\n")
+	}
 	fmt.Printf("\n\n")
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch t := node.(type) {
@@ -98,22 +91,7 @@ func doMain2() error {
 	for _, d := range f.Decls {
 		fmt.Printf("decl (%p): %#v\n", d, d)
 	}
-	/*
-		for _, d := range f.Decls {
-			switch f := d.(type) {
-			case *ast.GenDecl:
-				for _, s := range f.Specs {
-					switch t := s.(type) {
-					case *ast.TypeSpec:
-						//ok. found a type. ?
-						fmt.Printf("type name: %s\n", t.Name)
-					}
-				}
-			case *ast.FuncDecl:
-			}
-		}
-	*/
-	return write("myimpl.gox", f)
+
 }
 
 func cr(w io.Writer, implementation, pkg string) (*ast.File, error) {
@@ -181,18 +159,26 @@ func createBasic(w io.Writer, implementation, pkg string) (string, error) {
 	return typeDecl, nil
 }
 
-func write(filename string, f *ast.File) error {
-	fset := token.NewFileSet()
+func writeASTToFile(f *ast.File, filename string) error {
 	fw, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 	defer fw.Close()
-	err = (&printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}).Fprint(fw, fset, f)
+	err = writeAST(f, fw)
 	if err != nil {
 		return err
 	}
 	err = fw.Close()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAST(f *ast.File, fw io.Writer) error {
+	fset := token.NewFileSet()
+	err := (&printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}).Fprint(fw, fset, f)
 	if err != nil {
 		return err
 	}
