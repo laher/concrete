@@ -1,0 +1,39 @@
+# todos
+
+## Switch to Pure AST code generation:
+
+### Add struct (as necessary)
+
+### Add each method (as necessary)
+
+### Handle multiple files.
+
+#### Add methods to main struct's file.
+#### Ensure that we check all files before recreating method.
+
+
+## Test cases:
+
+### Pre-existing code
+
+#### No implementation exists
+#### Pre-existing struct
+#### Pre-existing method
+
+### Receivers
+
+#### Pointer receiver
+#### Non-pointer receiver
+#### Non-struct receiver
+
+### Return values
+
+#### Return fmt.Errorf("")
+#### Return nils
+#### Return nonnillables
+
+### Packages
+
+#### Same package
+#### Interface package differs from implementation
+#### Parameter/return types from different packages
