@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"testing"
 )
@@ -30,43 +32,12 @@ type Rdr interface {
 func TestAst1(t *testing.T) {
 	implName := "MyImpl"
 	pkgName := "main"
-	/*
-		f, err := cr(os.Stdout, implName, "mypkg")
-		if err != nil {
-			return err
-		}
-	*/
 	f := &ast.File{
 		Name:    ast.NewIdent(pkgName),
 		Decls:   []ast.Decl{},
 		Imports: []*ast.ImportSpec{},
 	}
-
-	/*
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, "blah.go", minimal, 0)
-		if err != nil {
-			return err
-		}
-	*/
 	addImport(f, "flag", "_")
-
-	//	fmt.Printf("File: %+v", f)
-	/*
-		for _, d := range f.Decls {
-			switch f := d.(type) {
-			case *ast.GenDecl:
-				for _, s := range f.Specs {
-					switch t := s.(type) {
-					case *ast.TypeSpec:
-						//ok. found a type. ?
-						fmt.Printf("type name: %s\n", t.Name)
-					}
-				}
-			case *ast.FuncDecl:
-			}
-		}
-	*/
 	addImplementationStruct(f, implName)
 	buf := &bytes.Buffer{}
 	err := writeAST(f, buf)
@@ -82,5 +53,57 @@ type MyImpl struct {
 }
 ` {
 		t.Fatalf("incorrect code generated: |%s|", out)
+	}
+}
+
+func TestNoImplementationExists(t *testing.T) {
+	implName := "MyImpl"
+	pkgName := "main"
+	f := &ast.File{
+		Name:    ast.NewIdent(pkgName),
+		Decls:   []ast.Decl{},
+		Imports: []*ast.ImportSpec{},
+	}
+	addImplementationStruct(f, implName)
+	buf := &bytes.Buffer{}
+	err := writeAST(f, buf)
+	if err != nil {
+		t.Fatalf("Failed ... %s", err)
+	}
+	out := buf.String()
+	if out != `package main
+
+type MyImpl struct {
+}
+` {
+		t.Fatalf("incorrect code generated: |%s|", out)
+	}
+}
+
+func TestStructPointerImplementationExists(t *testing.T) {
+	implName := "MyImpl"
+	fset := token.NewFileSet()
+	minimal := `package main
+
+type MyImpl struct {
+}
+`
+	f, err := parser.ParseFile(fset, "blah.go", minimal, 0)
+	if err != nil {
+		t.Fatalf("failed to parse implementation")
+	}
+	addImplementationStruct(f, implName)
+	buf := &bytes.Buffer{}
+	err = writeAST(f, buf)
+	if err != nil {
+		t.Fatalf("Failed ... %s", err)
+	}
+	out := buf.String()
+	expected := `package main
+
+type MyImpl struct{}
+`
+	if out != expected {
+		t.Fatalf("incorrect code generated: |%s| vs |%s|", out, expected)
 	}
 }
